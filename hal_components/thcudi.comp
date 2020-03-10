@@ -1,0 +1,141 @@
+component thcudi "Torch Height Control Up/Down Input";
+
+description
+"""
+Torch Height Control
+
+""";
+
+author "torvn77";
+
+license "GPLv2";
+
+//option singleton yes;
+// What this???
+
+function update_offseted_out "Updated the output value by adding the offset to the input";
+function update_source_out   "Update the feedback value by subtracting the offset from the feedback";
+function calculate_offset    "";
+
+
+// Command
+pin in  float cmd_source_in  "Z Motor Position Command in from axis.n.motor-pos-cmd";;
+pin out float fb_source_out  "Z Motor Position Command in from axis.n.motor-pos-fb";;
+
+// Motor
+pin out float cmd_offseted_out "Command offseted value in from stepgen";
+pin in  float fb_offseted_in   "Feedback offseted value in from stepgen";
+
+// Torch command, status pin and parametrs
+pin in  bit enable_thc  "Enable the THC, connect to VCP panel, if not enabled Z position is passed through";
+pin in  bin torch_on    "Enable the THC, connect to spindle.N.on";
+pin in  bit arc_ok      "Arc Ok from Plasma Torch(Connect to an input LPT/GPIO pin)";
+pin in  bin torch_down  "(Connect to an input LPT/GPIO pin)";
+pin in  bin torch_up    "(Connect to an input LPT/GPIO pin)";
+
+// Status pin
+pin in  estop_in  "E-Stop signal in"
+pin out estop_out "E-Stop signal out"
+pin out float axis_offset    "Current offset value";
+pin out bin   offset_zeroed  "Флаг обнуления оффсета"
+
+
+function _;
+
+;;
+
+//#include "rtapi_math.h"
+// Это точно необходимо?
+
+FUNCTION(update_offseted_out) { cmd_offseted_out = cmd_source_in + axis_offset; }
+
+FUNCTION(update_source_out)   { fb_source_out = fb_offseted_in - axis_offset; }
+
+FUNCTION(calculate_offset) {
+bit thc_on
+if (torch_on && enable_thc){thc_on = 1} else {thc_on = 0}
+float axis_diff = fb_offseted_in - cmd_source_in
+float axis_diff_inv = cmd_source_in - fb_offseted_in
+
+float min_velocity = requested_vel -(requested_vel*(velocity_tol*0.01));
+if(current_vel > 0 && current_vel >= min_velocity){vel_status = 1;} else {vel_status =0;}
+
+if(thc_on && offset_zeroed){
+offset_zeroed = 0
+// Тут больше ничего делать не надо
+// Нужное будет сделано в следующем условии
+}
+
+if(thc_on && !offset_removed){
+
+    if(torch_up){
+
+        if(axis_diff <= correction_move_step && axis_diff_inv <= correction_move_step){
+            // Разница текущего положения и команды равна или меньше шагу коррекционного перемешения, по этому увеличиваем офсет.
+            axis_offset = axis_diff + correction_move_step
+        }
+        if(axis_diff > correction_move_step){
+            // Текущее положение выше запрашиваемой команды, при этом разница между ними больше шага коррекционного перемещения,
+            // по этому просто приравниваем офсет к текущему фактическому значению.
+            axis_offset = axis_diff
+        }
+
+//        if(axis_diff_inv > correction_move_step){
+            // Текущее положение ниже запрашиваемой команды, при этом разница между ними больше шага быстрого перемещения,
+            // по этому ничего не делаем и ждём когда двигатель доедет до текущей позиции.
+            //axis_offset = axis_diff + correction_move_step
+//        }
+    }
+    if(torch_down){
+        if(axis_diff <= correction_move_step && axis_diff_inv <= correction_move_step){
+            // Разница текущего положения и команды равно или меньше шагу  коррекционного перемешения, по этому уменьшаем офсет.
+            axis_offset = axis_diff + correction_move_step
+        }
+
+        if(axis_diff_inv > correction_move_step){
+            // Текущее положение ниже запрашиваемой команды, при этом разница между ними больше шага  коррекционного перемещения,
+            // по этому  просто приравниваем офсет к текущему фактическому значению.
+            axis_offset = axis_diff
+        }
+
+//        if(axis_diff > correction_move_step){
+            // Текущее положение выше запрашиваемой команды, при этом разница между ними больше шага коррекционного перемещения,
+            // по этому ничего не делаем и ждём когда двигатель доедет до текущей позиции.
+//            axis_offset = axis_diff
+//        }
+
+
+    }
+}
+
+if(!thc_on && !offset_zeroed){
+float axis_diff = fb_offseted_in - cmd_source_in
+float axis_diff_inv = cmd_source_in - fb_offseted_in
+
+    if(axis_diff > ramping_move_step){
+        // Текущее положение выше запрашиваемой команды, при этом разница между больше шага быстрого перемещения,
+        // по этому постепенно уменьшаем офсет по направлению к нулевому значению.
+        axis_offset = axis_diff - ramping_move_step
+    }
+
+    if(axis_diff_inv > ramping_move_step){
+        // Текущее положение ниже запрашиваемой команды, при этом разница между ними больше шага быстрого перемещения,
+        // по этому постепенно увеличиваем офсет по направлению к нулевому значению.
+        axis_offset = axis_diff + ramping_move_step
+    }
+
+    if(axis_diff <= ramping_move_step && axis_diff_inv <= ramping_move_step){
+        // Разница текущего положения и команды равно или меньше шагу быстрого перемешения, по этому просто сбрасываем офсет в ноль и ставим флаг обнуления оффсета.
+        axis_offset = 0;
+        offset_zeroed = 1;
+    }
+}
+
+
+//if(!thc_on && offset_zeroed){
+// в этом случае ничего делать не нужно.
+//axis_offset = 0;
+//}
+
+
+}
